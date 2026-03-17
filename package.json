@@ -1,0 +1,4 @@
+{
+  "name": "phx_infinite_stream",
+  "main": "priv/static/infinite_scroll.js"
+}
