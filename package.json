@@ -1,4 +1,8 @@
 {
   "name": "phx_infinite_stream",
-  "main": "priv/static/infinite_scroll.js"
+  "main": "priv/static/infinite_scroll.js",
+  "type": "module",
+  "scripts": {
+    "test": "node --test 'test/js/*.test.mjs'"
+  }
 }
