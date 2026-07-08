@@ -103,8 +103,17 @@ end
 ```
 
 `init/3` creates an empty stream and sets up pagination metadata under
-`@pagination.items`. Use `start_async` + `put_items` for non-blocking
-initial loads.
+`@pagination.items`. The stream stays silent until the first page arrives:
+use `start_async` + `put_items` as above for non-blocking initial loads, or
+call `reload/3` right after `init/3` for a simple synchronous load.
+
+`init/3` options:
+
+- `:page_size` — items per page, positive integer (default: `20`)
+- `:limit` — DOM cap forwarded to every stream insert. Pages are appended,
+  so use a negative value (`limit: -300` keeps the 300 most recent entries);
+  pruned items are not re-fetched when scrolling back up
+- anything else (e.g. `:dom_id`) is forwarded to `Phoenix.LiveView.stream/4`
 
 ### Render the stream
 
@@ -112,6 +121,7 @@ initial loads.
 <.infinite_stream
   id="items-stream"
   end?={@pagination.items.all_loaded}
+  page={@pagination.items.page}
   load_event="load_more_items"
   class="space-y-3 pb-8"
 >
@@ -119,21 +129,25 @@ initial loads.
 </.infinite_stream>
 ```
 
-The container must live inside a scrollable parent (e.g., a div with
-`overflow-y: auto` and constrained height). The hook auto-detects the
-nearest scrollable ancestor.
+The hook roots its IntersectionObserver at the nearest scrollable ancestor
+(`overflow-y: auto|scroll`), falling back to the viewport — plain window
+scrolling works, no wrapper element required.
 
-### Handle scroll events
+### Handle load events
 
 ```elixir
-def handle_event("load_more_items", _, socket) do
+def handle_event("load_more_items", params, socket) do
   loader = fn page -> MyApp.Items.list_page(page) end
-  {:noreply, InfiniteStream.load_more(socket, :items, loader)}
+  {:noreply, InfiniteStream.load_more(socket, :items, params, loader)}
 end
 ```
 
 The `loader` receives a 1-based page number and must return `{:ok, items}`.
-`load_more/3` is a no-op when all items are already loaded.
+`load_more/4` is a no-op when all items are already loaded — or when the
+event carries a page (via the component's `page` attribute) that no longer
+matches the server's, which drops duplicate and stale scroll events. Both
+the `page` attribute and the params are optional; `load_more/3` without
+params trusts every event.
 
 ### Reload after filter/sort changes
 
@@ -171,14 +185,17 @@ socket
 
 | Function | Description |
 |---|---|
-| `init(socket, name, opts)` | Initialize a stream with pagination tracking |
+| `init(socket, name, opts)` | Initialize a stream (`:page_size`, `:limit`, rest to `stream/4`) |
 | `put_items(socket, name, page, items, opts)` | Set pre-loaded items (`:reset` option for full reset) |
-| `load_more(socket, name, loader)` | Load next page and append (no-op if all loaded) |
+| `load_more(socket, name, params \\ %{}, loader)` | Load next page and append (no-op if all loaded or event is stale) |
 | `reload(socket, name, loader)` | Reset stream and load from page 1 |
 | `all_loaded?(socket, name)` | Check if all items have been loaded |
 | `page(socket, name)` | Get the current page number |
 | `page_size(socket, name)` | Get the configured page size |
 | `js_path()` | Absolute path to the JS hook file |
+
+All helpers raise `ArgumentError` for stream names that were never passed to
+`init/3`.
 
 ### Component Attributes
 
@@ -186,7 +203,8 @@ socket
 |---|---|---|---|---|
 | `id` | `string` | yes | — | DOM id for the stream container |
 | `end?` | `boolean` | no | `false` | Whether all items are loaded |
-| `load_event` | `string` | yes | — | Event pushed on scroll to bottom |
+| `page` | `integer` | no | `nil` | Current page; enables duplicate/stale-event protection |
+| `load_event` | `string` | yes | — | Event pushed when more items are needed |
 | `class` | `string` | no | `nil` | CSS classes |
 | `:global` | | | | All other attributes passed through |
 
@@ -220,12 +238,16 @@ via `phx-hook` are processed through a different code path in LiveView that
 reliably mounts during both join patches and regular updates.
 
 The custom hook:
-1. Walks up the DOM to find the nearest scrollable ancestor (`overflow-y: auto|scroll`)
-2. Attaches a scroll listener to that ancestor (or `window` if none found)
-3. On each downward scroll, checks if the last stream child is visible
-4. Pushes the configured `data-load-event` to the server
-5. Reads `data-end` on each scroll — stops firing once all items are loaded
-6. Re-detects the scroll container on `updated()` in case the DOM changes
+1. Observes the last stream item with an IntersectionObserver, rooted at the
+   nearest scrollable ancestor (`overflow-y: auto|scroll`) or the viewport,
+   with a 200px load margin
+2. Fires as soon as the last item approaches the visible area — including
+   right after mount and after every patch, so first pages that don't fill
+   the viewport chain-load without any scrolling
+3. Keeps a single load in flight and sends the current `data-page` in the
+   event payload, letting `load_more/4` drop duplicate or stale events
+4. Stops once `data-end` is set; re-observes the new last item (and
+   re-detects the scroll container) after every patch
 
 ## License
 

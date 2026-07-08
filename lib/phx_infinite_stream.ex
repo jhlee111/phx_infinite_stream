@@ -20,8 +20,29 @@ defmodule PhxInfiniteStream do
 
   ### Mount
 
+  `init/3` creates an empty stream and its pagination metadata, but stays
+  silent (`all_loaded: true`) until the first page arrives — load it with
+  `put_items/5` (async, recommended) or `reload/3` (sync):
+
+      def mount(_params, _session, socket) do
+        {:ok,
+         socket
+         |> PhxInfiniteStream.init(:items, page_size: 20)
+         |> start_async(:load_items, fn ->
+           {:ok, items} = MyApp.load_items(1)
+           items
+         end)}
+      end
+
+      def handle_async(:load_items, {:ok, items}, socket) do
+        {:noreply, PhxInfiniteStream.put_items(socket, :items, 1, items, reset: true)}
+      end
+
+  Or synchronously:
+
       socket
       |> PhxInfiniteStream.init(:items, page_size: 20)
+      |> PhxInfiniteStream.reload(:items, fn page -> MyApp.load_items(page) end)
 
   ### Template
 
@@ -181,6 +202,8 @@ defmodule PhxInfiniteStream do
   Initialize an infinite stream with pagination tracking.
 
   Creates the stream and sets up pagination metadata under `@pagination.<stream_name>`.
+  The stream starts empty with `all_loaded: true` — nothing loads until the
+  first page arrives via `put_items/5` or `reload/3` (see the module docs).
 
   ## Options
 

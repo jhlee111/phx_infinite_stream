@@ -305,18 +305,10 @@ defmodule PhxInfiniteStreamTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Known sharp edges — tracked in GitHub issues
-  #
-  # The tests below PIN current behavior that is intentionally unchanged for
-  # now. When the referenced issue is fixed, invert the assertions.
-  # ---------------------------------------------------------------------------
-
-  describe "issue #2: bare init/3 loads nothing until put_items/reload" do
-    # init/3 sets all_loaded: true by design: the stream stays silent until
-    # the first page arrives via put_items/5 or reload/3 (README flow). The
-    # moduledoc's Usage section omits that initial-load step, which makes the
-    # documented flow a dead end — tracked in issue #2.
+  describe "bare init/3 stays silent until the first page arrives" do
+    # By design, init/3 sets all_loaded: true: the stream loads nothing until
+    # the first page is put via put_items/5 or reload/3 — both the moduledoc
+    # Usage section and the README show this initial-load step.
     test "after bare init/3, load_more/3 never invokes the loader" do
       socket = IS.init(build_socket(), :items, page_size: 5)
 
@@ -338,23 +330,6 @@ defmodule PhxInfiniteStreamTest do
         """)
 
       assert html =~ ~s(data-end="true")
-    end
-  end
-
-  describe "issue #1: loader errors crash the LiveView" do
-    # `{:ok, items} = loader.(page)` means any {:error, _} (DB down, timeout…)
-    # raises MatchError and takes the whole LiveView process down — remounting
-    # the page and wiping client state. An error path (`:on_error` option or
-    # {:error, _} passthrough) is tracked in issue #1.
-    test "an {:error, _} return raises MatchError" do
-      socket =
-        build_socket()
-        |> IS.init(:items, page_size: 2)
-        |> IS.put_items(:items, 1, items(1..2))
-
-      assert_raise MatchError, fn ->
-        IS.load_more(socket, :items, fn _ -> {:error, :db_down} end)
-      end
     end
   end
 
@@ -382,6 +357,30 @@ defmodule PhxInfiniteStreamTest do
 
       assert_raise ArgumentError, ~r/unknown infinite stream/, fn ->
         IS.reload(socket, :itmes, fn _ -> raise "loader must not run" end)
+      end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Known sharp edges — tracked in GitHub issues
+  #
+  # The tests below PIN current behavior that is intentionally unchanged for
+  # now. When the referenced issue is fixed, invert the assertions.
+  # ---------------------------------------------------------------------------
+
+  describe "issue #1: loader errors crash the LiveView" do
+    # `{:ok, items} = loader.(page)` means any {:error, _} (DB down, timeout…)
+    # raises MatchError and takes the whole LiveView process down — remounting
+    # the page and wiping client state. An error path (`:on_error` option or
+    # {:error, _} passthrough) is tracked in issue #1.
+    test "an {:error, _} return raises MatchError" do
+      socket =
+        build_socket()
+        |> IS.init(:items, page_size: 2)
+        |> IS.put_items(:items, 1, items(1..2))
+
+      assert_raise MatchError, fn ->
+        IS.load_more(socket, :items, fn _ -> {:error, :db_down} end)
       end
     end
   end
